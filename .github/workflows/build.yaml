@@ -1,0 +1,96 @@
+name: Go CI/CD
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - "**"
+  release:
+    types:
+      - created
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  test:
+    if: github.event_name == 'push' || github.event_name == 'release' # Ensures build only happens on push or release
+    name: Test on all branches and PRs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Go mod tidy
+        run: go mod tidy
+
+      - name: Test
+        run: go test -v -cover ./...
+
+  lint:
+    name: Lint on all branches and PRs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.42.1
+
+      - name: Lint
+        run: golangci-lint run
+
+  build:
+    if: github.event_name == 'push' || github.event_name == 'release' # Ensures build only happens on push or release
+    needs: test
+    name: Build and Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.22"
+
+      - name: Build
+        run: |
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ./bin/pspdfkit_pe_challenge_linux_amd64 main.go
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pspdfkit-pe-challenge-linux-amd64
+          path: ./bin/pspdfkit_pe_challenge_linux_amd64
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') # Ensures release only happens on tag push
+    name: Create Release and Upload Artifacts
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: pspdfkit-pe-challenge-linux-amd64
+          path: ./bin
+
+      - name: Upload Release Assets
+        run: |
+          echo "Uploading artifact pspdfkit-pe-challenge-linux-amd64..."
+          gh release upload "${{ github.ref_name }}" "./bin/pspdfkit_pe_challenge_linux_amd64" --repo "${{ github.repository }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
